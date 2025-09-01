@@ -1,262 +1,418 @@
-# Developer Task Specification
+# Developer Task Specification - Voice Agent Platform
 
-## Project: Voice AI Agent Backend Implementation
+## Project: B2B SaaS Platform for Voice Agent Creation
 
 ### Overview
-Implement backend functionality for a voice AI web application. The frontend UI is complete and uses Next.js 14 with TypeScript. You will connect voice processing APIs and set up real-time communication.
+Build a no-code platform where businesses can create, customize, and deploy AI voice agents using templates. Think "Shopify for Voice Agents" - businesses select templates, upload knowledge, customize branding, and deploy without technical skills.
 
 ## Required Deliverables
 
-### 1. API Routes (Priority: HIGH)
+### 1. Multi-Tenant Database Schema (Priority: CRITICAL)
 
-Create the following Next.js API routes in `/src/app/api/`:
-
-#### `/api/voice/transcribe`
-```typescript
-// POST endpoint
-// Accepts: Audio blob (webm/wav)
-// Returns: { text: string, confidence: number }
-// Integration: OpenAI Whisper API
-```
-
-#### `/api/voice/synthesize`  
-```typescript
-// POST endpoint
-// Accepts: { text: string, voice?: string }
-// Returns: Audio stream (mp3)
-// Integration: ElevenLabs API
-```
-
-#### `/api/chat/complete`
-```typescript
-// POST endpoint
-// Accepts: { messages: Message[], context?: string }
-// Returns: { response: string, tokens: number }
-// Integration: OpenAI GPT-4 API
-```
-
-### 2. WebSocket Implementation (Priority: HIGH)
-
-Set up real-time audio streaming:
-
-```typescript
-// File: /src/lib/websocket.ts
-- Initialize Socket.io server
-- Handle audio chunk streaming
-- Implement reconnection logic
-- Add heartbeat/ping mechanism
-```
-
-### 3. Database Schema (Priority: MEDIUM)
-
-Using Prisma with PostgreSQL:
+Design PostgreSQL schema with Prisma for complete isolation:
 
 ```prisma
-// schema.prisma
-model User {
-  id            String         @id @default(cuid())
-  email         String         @unique
-  conversations Conversation[]
-  createdAt     DateTime       @default(now())
+model Organization {
+  id                String          @id @default(cuid())
+  name              String
+  email             String          @unique
+  subscription      String          // starter|business|enterprise
+  agents            Agent[]
+  knowledgeBases    KnowledgeBase[]
+  apiKeys           ApiKey[]
+  users             User[]
+  createdAt         DateTime        @default(now())
 }
 
-model Conversation {
-  id        String    @id @default(cuid())
-  userId    String
-  user      User      @relation(fields: [userId], references: [id])
-  messages  Message[]
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+model AgentTemplate {
+  id                String          @id @default(cuid())
+  name              String          // "Customer Service", "Sales", "Booking"
+  category          String
+  elevenLabsConfig  Json            // Voice template from ElevenLabs
+  basePrompt        String          @db.Text // Protected core prompt
+  configurableFields Json           // What users can safely modify
+  previewUrl        String?
+  agents            Agent[]
 }
 
-model Message {
-  id             String       @id @default(cuid())
-  conversationId String
-  conversation   Conversation @relation(fields: [conversationId], references: [id])
-  role           String       // 'user' | 'assistant'
-  content        String
-  audioUrl       String?
-  createdAt      DateTime     @default(now())
+model Agent {
+  id                String          @id @default(cuid())
+  organizationId    String
+  organization      Organization    @relation(fields: [organizationId])
+  templateId        String
+  template          AgentTemplate   @relation(fields: [templateId])
+  name              String
+  customization     Json            // Brand, voice settings, safe tweaks
+  knowledgeBaseId   String?
+  knowledgeBase     KnowledgeBase?  @relation(fields: [knowledgeBaseId])
+  status            String          // draft|testing|deployed|paused
+  deploymentUrl     String?
+  conversations     Conversation[]
+  analytics         Analytics[]
+  createdAt         DateTime        @default(now())
+}
+
+model KnowledgeBase {
+  id                String          @id @default(cuid())
+  organizationId    String
+  organization      Organization    @relation(fields: [organizationId])
+  documents         Document[]
+  faqs              Json            // Structured Q&A pairs
+  products          Json            // Product catalog
+  companyInfo       Json            // About, policies, etc.
+  agents            Agent[]
+  vectorStoreId     String?         // Pinecone/Weaviate ID
+  lastProcessed     DateTime?
 }
 ```
 
-### 4. Error Handling (Priority: HIGH)
+### 2. Admin Dashboard Pages (Priority: CRITICAL)
 
-Add comprehensive error handling:
+Create Next.js pages for business users:
+
+#### `/dashboard` - Overview
+- Active agents with status
+- Recent conversations
+- Performance metrics
+- Quick actions (create agent, view analytics)
+
+#### `/agents/new` - Agent Creation Wizard
+```typescript
+// Step 1: Template Selection
+- Grid of template cards with previews
+- Category filters (customer service, sales, healthcare)
+- "Listen to Sample" button for each
+
+// Step 2: Knowledge Base Setup
+- Upload documents (PDF, DOCX, TXT)
+- Link existing resources (websites, Google Docs)
+- Guided Q&A builder
+- Product catalog import (CSV/JSON)
+
+// Step 3: Brand Customization
+- Company name and info
+- Voice personality sliders (formal ← → casual)
+- Conversation style options
+- Restricted word list
+
+// Step 4: Behavior Configuration
+- "What should the agent do?" checkboxes
+- "What shouldn't the agent say?" inputs
+- Business hours settings
+- Escalation rules
+
+// Step 5: Test & Deploy
+- Live preview with test conversations
+- Deployment options (widget, phone, API)
+- Integration instructions
+```
+
+#### `/agents/[id]/edit` - Agent Management
+- Safe configuration zone (can't break agent)
+- Knowledge base updates
+- Performance monitoring
+- Conversation history
+- Danger zone (with warnings)
+
+#### `/knowledge` - Knowledge Base Manager
+- Document library with upload
+- FAQ editor
+- Product catalog
+- Company information
+- Processing status for each document
+
+#### `/analytics` - Performance Dashboard
+- Conversation success rate
+- Common questions
+- Agent response times
+- User satisfaction
+- Usage vs plan limits
+
+### 3. API Routes for Platform (Priority: HIGH)
+
+#### Template Management
+```typescript
+// GET /api/templates
+// Returns available templates with metadata
+
+// GET /api/templates/[id]/preview
+// Returns sample conversation for template
+```
+
+#### Agent Operations
+```typescript
+// POST /api/agents/create
+// Input: templateId, organizationId, customization
+// Process: Combines template + knowledge + brand
+// Returns: agentId, deploymentUrl
+
+// PUT /api/agents/[id]/customize
+// Validates changes against safety rules
+// Prevents breaking modifications
+
+// POST /api/agents/[id]/deploy
+// Activates agent for production use
+
+// GET /api/agents/[id]/test
+// Returns test interface URL
+```
+
+#### Knowledge Base Processing
+```typescript
+// POST /api/knowledge/upload
+// Accepts: PDF, DOCX, TXT, CSV
+// Process: Extract, chunk, vectorize
+// Store: PostgreSQL + vector DB
+
+// POST /api/knowledge/process
+// Converts documents to searchable format
+// Creates embeddings for retrieval
+
+// GET /api/knowledge/validate
+// Checks if knowledge base is sufficient
+// Warns about potential gaps
+```
+
+### 4. Safety & Validation System (Priority: CRITICAL)
+
+Implement protection layers:
 
 ```typescript
-// /src/lib/errors.ts
-- API rate limit errors
-- Network timeout handling  
-- Invalid audio format errors
-- Token limit exceeded
-- Database connection errors
+// /src/lib/safety/validator.ts
+
+class AgentValidator {
+  // Prevent prompt injection
+  validateCustomization(input: any): ValidationResult
+  
+  // Check knowledge base size limits
+  validateKnowledgeSize(kb: KnowledgeBase): boolean
+  
+  // Ensure changes won't break agent
+  validateConfiguration(config: any): SafetyCheck
+  
+  // Monitor performance degradation
+  checkPerformanceImpact(changes: any): Risk
+}
+
+// /src/lib/safety/guardrails.ts
+
+const PROTECTED_FIELDS = [
+  'basePrompt',
+  'systemInstructions',
+  'apiConfiguration',
+  'securitySettings'
+]
+
+const SAFE_CUSTOMIZATIONS = [
+  'greetingMessage',
+  'personalityTone',
+  'companyName',
+  'workingHours'
+]
+
+const DANGER_ZONE = [
+  'customPromptAdditions', // With limits
+  'advancedFilters',
+  'apiWebhooks'
+]
 ```
 
-### 5. Frontend Integration (Priority: HIGH)
+### 5. Voice Agent Runtime (Priority: HIGH)
 
-Update existing component at `/src/app/page.tsx`:
+Multi-tenant voice processing:
 
 ```typescript
-// Replace mock functions with real API calls
-- processAudio(): Call /api/voice/transcribe
-- getAIResponse(): Call /api/chat/complete  
-- synthesizeSpeech(): Call /api/voice/synthesize
-- Add loading states
-- Add error boundaries
-```
+// /src/lib/voice/runtime.ts
 
-### 6. Testing (Priority: MEDIUM)
-
-Create tests in `/tests/`:
-
-```typescript
-// API endpoint tests
-- test-transcribe.test.ts
-- test-synthesize.test.ts
-- test-chat.test.ts
-
-// Integration tests
-- test-voice-pipeline.test.ts
-```
-
-## Technical Requirements
-
-### Environment Variables Needed
-```env
-# You'll receive development keys
-OPENAI_API_KEY=
-ELEVENLABS_API_KEY=
-DATABASE_URL=postgresql://...
-NEXTAUTH_SECRET=
-WEBSOCKET_URL=ws://localhost:3001
-```
-
-### Dependencies to Install
-```json
-{
-  "dependencies": {
-    "openai": "^4.0.0",
-    "socket.io": "^4.0.0",
-    "socket.io-client": "^4.0.0",
-    "@prisma/client": "^5.0.0",
-    "axios": "^1.0.0"
-  },
-  "devDependencies": {
-    "prisma": "^5.0.0",
-    "@types/socket.io": "^3.0.0"
+class VoiceAgentRuntime {
+  constructor(agentId: string, orgId: string)
+  
+  async processVoiceInput(audio: Blob) {
+    // 1. Validate org has active subscription
+    // 2. Get agent configuration
+    // 3. Speech-to-text (Whisper)
+    // 4. Retrieve context from knowledge base
+    // 5. Generate response (GPT-4 with template)
+    // 6. Text-to-speech (ElevenLabs)
+    // 7. Log conversation
+    // 8. Update analytics
+  }
+  
+  getAgentPrompt(agent: Agent): string {
+    // Combine: template base + knowledge + customization
+    // Inject: safety constraints
+    // Never expose: core prompt to user
   }
 }
 ```
 
-## Code Quality Requirements
+### 6. Deployment System (Priority: MEDIUM)
 
-### Must Have:
-- TypeScript with strict mode
-- Proper error handling (try/catch)
-- Input validation using Zod
-- Rate limiting on API routes
-- Proper async/await usage
-- Environment variable validation
+Agent deployment options:
 
-### Nice to Have:
-- JSDoc comments for functions
-- Request/response type definitions
-- Logging for debugging
-- Performance monitoring hooks
+```typescript
+// /src/lib/deployment/index.ts
 
-## Definition of Done
+// Widget Deployment
+generateWidgetCode(agentId: string): string
+// Returns embeddable JavaScript snippet
 
-Each feature is considered complete when:
+// Phone Integration
+provisionPhoneNumber(agentId: string): PhoneNumber
+// Sets up Twilio integration
 
-- [ ] Code is written and working
-- [ ] TypeScript has no errors
-- [ ] Basic error handling implemented
-- [ ] Tested manually with the UI
-- [ ] At least one automated test
-- [ ] Pull request created with description
-- [ ] No hardcoded values (use env vars)
+// API Access
+generateApiCredentials(agentId: string): ApiKey
+// Creates secure API access
+```
 
-## API Documentation Examples
+### 7. Template System (Priority: HIGH)
 
-### Transcribe Audio
-```bash
-curl -X POST http://localhost:3000/api/voice/transcribe \
-  -H "Content-Type: multipart/form-data" \
-  -F "audio=@recording.webm"
+Template management:
 
-Response:
+```typescript
+// /src/lib/templates/manager.ts
+
+interface AgentTemplate {
+  id: string
+  name: string
+  category: string
+  basePrompt: string // Never exposed to users
+  elevenLabsVoiceId: string
+  sampleConversation: string[]
+  configurableFields: {
+    field: string
+    type: 'text' | 'select' | 'range'
+    validation: any
+    impact: 'safe' | 'moderate' | 'danger'
+  }[]
+}
+
+// Import templates from ElevenLabs
+// Add safety wrappers
+// Define customization boundaries
+```
+
+### 8. Analytics & Monitoring (Priority: MEDIUM)
+
+Track platform and agent performance:
+
+```typescript
+// /src/lib/analytics/tracker.ts
+
+// Platform metrics
+- Total organizations
+- Active agents
+- Daily conversations
+- Success rates
+
+// Per-organization metrics  
+- Agent performance
+- Usage vs limits
+- Popular questions
+- Failed conversations
+
+// Per-agent metrics
+- Response time
+- Satisfaction score
+- Escalation rate
+- Knowledge gaps
+```
+
+## Testing Requirements
+
+### Unit Tests
+- Template validation
+- Safety guardrails
+- Knowledge processing
+- Multi-tenant isolation
+
+### Integration Tests
+- Full agent creation flow
+- Voice pipeline end-to-end
+- Knowledge base updates
+- Deployment process
+
+### Security Tests
+- Tenant isolation
+- Prompt injection prevention
+- API authentication
+- Rate limiting
+
+## Technical Stack
+
+### Required Dependencies
+```json
 {
-  "text": "Hello, how can I help you?",
-  "confidence": 0.95,
-  "duration": 3.2
+  "dependencies": {
+    "@prisma/client": "^5.0.0",
+    "openai": "^4.0.0",
+    "elevenlabs": "^0.1.0",
+    "pinecone-client": "^1.0.0",
+    "bull": "^4.0.0", // Job queues
+    "stripe": "^13.0.0", // Billing
+    "next-auth": "^4.0.0",
+    "zod": "^3.0.0", // Validation
+    "react-hook-form": "^7.0.0",
+    "recharts": "^2.0.0" // Analytics charts
+  }
 }
 ```
 
-### Generate Chat Response
-```bash
-curl -X POST http://localhost:3000/api/chat/complete \
-  -H "Content-Type: application/json" \
-  -d '{
-    "messages": [
-      {"role": "user", "content": "Hello"}
-    ]
-  }'
-
-Response:
-{
-  "response": "Hello! How can I assist you today?",
-  "tokens": 12
-}
-```
-
-## File Structure Expected
+## File Structure
 
 ```
 src/
 ├── app/
-│   ├── api/
-│   │   ├── voice/
-│   │   │   ├── transcribe/route.ts
-│   │   │   └── synthesize/route.ts
-│   │   └── chat/
-│   │       └── complete/route.ts
-│   └── page.tsx (update existing)
+│   ├── (auth)/
+│   │   ├── login/
+│   │   └── signup/
+│   ├── (dashboard)/
+│   │   ├── agents/
+│   │   │   ├── new/
+│   │   │   └── [id]/
+│   │   ├── knowledge/
+│   │   ├── analytics/
+│   │   └── settings/
+│   └── api/
+│       ├── agents/
+│       ├── templates/
+│       ├── knowledge/
+│       └── voice/
+├── components/
+│   ├── agent-builder/
+│   ├── knowledge-manager/
+│   ├── template-selector/
+│   └── analytics-charts/
 ├── lib/
-│   ├── websocket.ts
-│   ├── errors.ts
-│   ├── prisma.ts
-│   └── api-client.ts
-└── types/
-    └── index.ts
+│   ├── auth/
+│   ├── safety/
+│   ├── templates/
+│   ├── knowledge/
+│   ├── voice/
+│   └── deployment/
+└── prisma/
+    └── schema.prisma
 ```
 
-## Communication
+## Definition of Done
 
-### Questions?
-- Open an issue in the repository
-- Comment on the pull request
-- Use Upwork messaging
+- [ ] Multi-tenant database with full isolation
+- [ ] Complete agent creation wizard
+- [ ] Template system with ElevenLabs integration
+- [ ] Knowledge base processing pipeline
+- [ ] Safety validation on all inputs
+- [ ] Voice processing runtime
+- [ ] Analytics dashboard
+- [ ] Deployment options (widget/API)
+- [ ] 90% test coverage
+- [ ] Security audit passed
 
-### Daily Updates Expected:
-1. What you completed yesterday
-2. What you're working on today
-3. Any blockers or questions
+## Success Criteria
 
-## Timeline
-
-- **Day 1-2**: API routes implementation
-- **Day 3-4**: WebSocket setup
-- **Day 5-6**: Database integration
-- **Day 7-8**: Testing and documentation
-- **Day 9-10**: Bug fixes and polish
-
-Total estimate: 10 working days
-
-## Resources
-
-- [OpenAI API Docs](https://platform.openai.com/docs)
-- [ElevenLabs API Docs](https://docs.elevenlabs.io)
-- [Next.js API Routes](https://nextjs.org/docs/app/building-your-application/routing/route-handlers)
-- [Prisma Documentation](https://www.prisma.io/docs)
-- [Socket.io Documentation](https://socket.io/docs/v4)
+- Business can create agent in < 30 minutes
+- No technical knowledge required
+- Agent cannot be broken by user input
+- Each org's data completely isolated
+- Platform handles 100+ organizations
+- Voice latency < 500ms per conversation
